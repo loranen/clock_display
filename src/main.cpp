@@ -29,21 +29,21 @@ std::vector<int> strips1 = { 0,  1,  2,  3,  4,  5,  6};
 std::vector<int> strips2 = { 7,  8,  9, 10, 11, 12, 13};
 std::vector<int> strips3 = {14, 15, 16, 17, 18, 19, 20};
 std::vector<int> strips4 = {21, 22, 23, 24, 25, 26, 27};
-SevenSegmentDisplay ledNumber1(strips1, &mcp1, &mcp1);
-SevenSegmentDisplay ledNumber2(strips2, &mcp1, &mcp1);
-SevenSegmentDisplay ledNumber3(strips3, &mcp1, &mcp1);
-SevenSegmentDisplay ledNumber4(strips4, &mcp1, &mcp1);
+SevenSegmentDisplay ledNumber1(strips1, &mcp1, &mcp2);
+SevenSegmentDisplay ledNumber2(strips2, &mcp1, &mcp2);
+SevenSegmentDisplay ledNumber3(strips3, &mcp1, &mcp2);
+SevenSegmentDisplay ledNumber4(strips4, &mcp1, &mcp2);
 
 void get_hours_minutes(int* hours, int* minutes);
 
 void errorMonitor(int errorCode);
 
+void turnAllOff();
+
 void setup() {
     int hours, minutes;
 
     Serial.begin(115200);
-    //while (!Serial);
-    Serial.println("MCP23xxx Blink Test!");
 
     Wire.begin(I2C_SDA, I2C_SCL);
 
@@ -51,11 +51,9 @@ void setup() {
         errorMonitor(EI2C_GRD);
     }
 
-    // TODO: uncomment when second exapnder is connected
-    //if (!mcp2.begin_I2C(0x4E, &Wire)) {
-    //    Serial.println("Error I2C init: mcp2.begin_I2C(0x4E, &Wire)");
-    //    ESP.restart();
-    //}
+    if (!mcp2.begin_I2C(0x27, &Wire)) {
+        errorMonitor(EI2C_VDD);
+    }
 
     // configure pin for output
     for (int i = 0; i < 16; i++) {
@@ -91,6 +89,23 @@ void setup() {
     WiFi.mode(WIFI_OFF);
 }
 
+void setColon(int state) {
+    mcp2.digitalWrite(4, state);
+}
+
+void turnAllOff() {
+    int led;
+
+    // MCP23017 GND
+    for (int ledStripNumber = 0; ledStripNumber < 16; ledStripNumber++) {
+        mcp1.digitalWrite(ledStripNumber, 0);
+    }
+   // MCP23017 VDD
+    for (int ledStripNumber = 0; ledStripNumber < 16; ledStripNumber++) {
+        mcp2.digitalWrite(ledStripNumber, 0);
+    }
+}
+
 void get_hours_minutes(int* hours, int* minutes) {
     struct tm timeinfo;
     if(!getLocalTime(&timeinfo)){
@@ -110,7 +125,7 @@ void loop() {
 
     // Check if error timeout reached
     errorMonitor(EMONITOR);
-
+    Serial.print("Timestamp: ");
     Serial.println(timeStamp);
     timeStamp = timeStamp+1;
 
@@ -129,7 +144,6 @@ void loop() {
     Serial.println(digit3);
     Serial.print("Digit4: ");
     Serial.println(digit4);
-
 
     ledNumber1.displayDigit(digit1);
     ledNumber2.displayDigit(digit2);
@@ -167,3 +181,4 @@ void errorMonitor(int errorCode) {
         ESP.restart();
     }
 }
+
