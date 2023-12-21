@@ -7,14 +7,22 @@
 #include <vector>
 #include <SevenSegmentDisplay.h>
 #include "main.h"
-#include "secret.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
+#define ONE_WIRE_BUS 2
+#define DS_POWER 4
 #define I2C_SDA	21
 #define I2C_SCL 22
 
+// Setup a oneWire instance to communicate with any OneWire devices
+OneWire oneWire(ONE_WIRE_BUS);
+// Pass our oneWire reference to Dallas Temperature sensor
+DallasTemperature sensors(&oneWire);
+
 int timeStamp = 0;
 ErrorCounter errorCnt = {0,0,0};
-const int ErrorTimeout = 10;
+int WifiErrorTimeout = 10;
 
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 7200;
@@ -25,10 +33,16 @@ Adafruit_MCP23X17 mcp1;
 Adafruit_MCP23X17 mcp2;
 
 // Init SSD instanses
-std::vector<int> strips1 = { 0,  1,  2,  3,  4,  5,  6};
-std::vector<int> strips2 = { 7,  8,  9, 10, 11, 12, 13};
-std::vector<int> strips3 = {14, 15, 16, 17, 18, 19, 20};
-std::vector<int> strips4 = {21, 22, 23, 24, 25, 26, 27};
+//std::vector<int> strips1 = { 0,  1,  2,  3,  4,  5,  6};
+//std::vector<int> strips2 = { 7,  8,  9, 10, 11, 12, 13};
+//std::vector<int> strips3 = {14, 15, 16, 17, 18, 19, 20};
+//std::vector<int> strips4 = {21, 22, 23, 24, 25, 26, 27};
+
+std::vector<int> strips1 = { 27,  26,  25,  24,  23,  22,  21};
+std::vector<int> strips2 = { 20,  19,  18, 17, 16, 15, 14};
+std::vector<int> strips3 = {13, 12, 11, 10,  9,  8, 7};
+std::vector<int> strips4 = { 6,  5,  4,  3,  2,  1, 0};
+
 SevenSegmentDisplay ledNumber1(strips1, &mcp1, &mcp2);
 SevenSegmentDisplay ledNumber2(strips2, &mcp1, &mcp2);
 SevenSegmentDisplay ledNumber3(strips3, &mcp1, &mcp2);
@@ -40,8 +54,13 @@ void errorMonitor(int errorCode);
 
 void turnAllOff();
 
+float getTemperature();
+
 void setup() {
     int hours, minutes;
+
+    pinMode(DS_POWER, OUTPUT); //Set pin 13 as an 'output' pin as we will make it output a voltage.
+    digitalWrite(DS_POWER, HIGH);
 
     Serial.begin(115200);
 
@@ -65,10 +84,13 @@ void setup() {
 
     // Connect to Wi-Fi
     Serial.print("Connecting to ");
-    /* These are defined in secret.h
-    const char* ssid     = "";
-    const char* password = "";
-    */
+
+    /************************************/
+    /*     Change the credentials       */
+    /************************************/
+    const char* ssid     = "WIFI_NAME";
+    const char* password = "WIFI_PASSWORD";
+
     Serial.println(ssid);
     WiFi.begin(ssid, password);
 
@@ -81,6 +103,10 @@ void setup() {
     Serial.println("");
     Serial.println("WiFi connected.");
 
+    // Change from 10 to 3: Longer timeput needen in init
+    WifiErrorTimeout = 3;
+    errorCnt.Wifi_time_cnt = 0;
+
     // Init and get the time
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     get_hours_minutes(&hours, &minutes);
@@ -91,6 +117,10 @@ void setup() {
 
 void setColon(int state) {
     mcp2.digitalWrite(4, state);
+}
+
+void setMinus(int state) {
+    mcp2.digitalWrite(9, state);
 }
 
 void turnAllOff() {
@@ -109,19 +139,31 @@ void turnAllOff() {
 void get_hours_minutes(int* hours, int* minutes) {
     struct tm timeinfo;
     if(!getLocalTime(&timeinfo)){
-        Serial.println("Failed to obtain time");
+        Serial.print("Failed to obtain time ");
         errorCnt.Wifi_time_cnt++; // Increment error counter
+        Serial.println(errorCnt.Wifi_time_cnt);
+
+        errorMonitor(EWIFI_TIME);
     }
 
     *hours = timeinfo.tm_hour;
     *minutes = timeinfo.tm_min;
+}
 
-    return;
+int countDigit(short number) {
+   int count = 0;
+   while(number != 0) {
+      number = number / 10;
+      count++;
+   }
+   return count;
 }
 
 void loop() {
     int digit1, digit2, digit3, digit4;
     int hours, minutes;
+    float raw_temperature;
+    short rounded_temperature;
 
     // Check if error timeout reached
     errorMonitor(EMONITOR);
@@ -145,11 +187,73 @@ void loop() {
     Serial.print("Digit4: ");
     Serial.println(digit4);
 
+    // Restart to sync clock
+    if ((hours == 3) && (minutes == 30))
+    {
+        Serial.println("Time to reboot to sync clock");
+        ESP.restart();
+    }
+
+    //turnAllOff();
+
     ledNumber1.displayDigit(digit1);
     ledNumber2.displayDigit(digit2);
     ledNumber3.displayDigit(digit3);
     ledNumber4.displayDigit(digit4);
-    delay(1000);
+    setColon(1);
+
+    delay(5000);
+
+    raw_temperature = getTemperature();
+    raw_temperature = raw_temperature + 0.5 - (raw_temperature<0);
+    rounded_temperature = (short)raw_temperature;
+    if (rounded_temperature == -127)
+    {
+        Serial.println("Temperature read failed!");
+    }
+    else{
+        turnAllOff();
+
+        if (raw_temperature < 0) {
+            Serial.println("Negative temperature");
+            setMinus(1);
+        }
+
+        rounded_temperature = std::abs(rounded_temperature);
+
+        digit1 = rounded_temperature/10;
+        digit2 = rounded_temperature%10;
+
+        Serial.print("rounded_temperature: ");
+        Serial.println(rounded_temperature);
+
+
+        Serial.print("Temp digit1: ");
+        Serial.println(digit1);
+        Serial.print("Temp digit2: ");
+        Serial.println(digit2);
+
+        if (countDigit(rounded_temperature) == 2) {
+            ledNumber3.displayDigit(digit1);
+            ledNumber4.displayDigit(digit2);
+        }
+        else {
+            ledNumber3.displayDigit(digit2);
+        }
+
+        delay(5000);
+    }
+
+}
+
+float getTemperature() {
+    float temperature;
+    sensors.requestTemperatures();
+    temperature = sensors.getTempCByIndex(0);
+
+    Serial.print("Celsius temperature: ");
+    Serial.println(temperature);
+    return temperature;
 }
 
 void errorMonitor(int errorCode) {
@@ -157,7 +261,7 @@ void errorMonitor(int errorCode) {
     switch (errorCode)
     {
     case EWIFI_TIME:
-        if (errorCnt.Wifi_time_cnt >= 10)
+        if (errorCnt.Wifi_time_cnt >= WifiErrorTimeout)
         {
             Serial.print("Could not connect to wifi");
             performReset = 1;
@@ -176,7 +280,7 @@ void errorMonitor(int errorCode) {
     }
 
     // If Error counter has been reached
-    if (performReset) {
+    if (performReset == 1) {
         Serial.println("Error counter timeout reached! -> RESET");
         ESP.restart();
     }
