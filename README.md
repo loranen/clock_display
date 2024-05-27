@@ -4,6 +4,13 @@
 ## Overview
 Clock Display is an open-source project aimed at creating a simple, yet customizable clock display using microcontrollers and C++. The project leverages the PlatformIO ecosystem for development and builds.
 
+Clock includes 4 seven segemnt displays plus dots in the middle. Display gets the time from internet. Sensor used for temperature measurements is ds18b20. Time and temperature alternate periodically.
+
+A seven-segment display consists of 7 generic LED strips controlled by MOSFET transistors.
+
+PCB was designed using KiCAD.
+![PCB picture](./doc/clock_pcb.png)
+
 ## Features
 - Customizable digital clock display
 - Written in C++
